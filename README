@@ -1,0 +1,3 @@
+This project is a scripted conversion of gdata-java-client sources to a Maven based project structure.
+
+The core guts of it is inside the build.xml file as the conversion is done using Ant.

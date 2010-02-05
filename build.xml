@@ -1,0 +1,544 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="gdata-maven" basedir="/Users/plynch/dev/google/gdata-java-client-read-only" default="mavenize">
+
+  <!-- TODO LIST -->
+  <!--
+  o make the module list in the java pom.xml dynamic by scanning
+  modules dirs after all are created
+  o svn delete where needed
+  o convert samples
+  o investigate mashups
+  o permanent solution to jsr305 official release
+  o compare and confirm an actual maven build of all modules
+  o write ant script that creates a difference report of final artifacts
+  o make sure spec version is part of artifact id or should it be?
+  o decide on importance of Class-Path jar entries
+  o add maven enforcer plugin
+  o enforce source code java 5 compatibility
+  o configure client.impl.version to be SNAPSHOT
+  o add scm config to child poms
+  o add more advanced service classpath detection
+  o add stale detection for apt plugin
+  -->
+
+  <description>
+    This buildfile converts the latest gdata-java-client trunk to a Maven build
+    and directory structure - complete with svn cmds to move existing files around
+    so that no file history is lost.
+  </description>
+
+  <!-- ================= PROPS ===================== -->
+  <property name="svn.exec" value="/opt/local/bin/svn" />
+  <property name="svn.move" value="move --parents" />
+  <property name="svn.add" value="add --force" />
+  <dirname property="gdata-maven.dir" file="${ant.file}"/>
+
+  <!-- ================= PATHS ===================== -->
+  <path id="service.buildfiles">
+    <fileset dir="${basedir}/java/build-src">
+      <include name="*.xml" />
+      <!-- our check to see if a meta jar needs to be created -->
+      <contains text="antcall target=&quot;template.build.service&quot;" />
+    </fileset>
+  </path>
+
+  <!-- ================= TASKDEF ===================== -->
+  <taskdef resource="net/sf/antcontrib/antlib.xml"
+           onerror="fail" classpath="${gdata-maven.dir}/ant-contrib.jar" />
+  <!-- http://www.oopsconsultancy.com/software/xmltask/ -->
+  <typedef name="xmltask" classname="com.oopsconsultancy.xmltask.ant.XmlTask"
+           onerror="fail" classpath="${gdata-maven.dir}/xmltask-1.16.1.jar"/>
+
+  <!-- ================= MACRODEF ===================== -->
+  <macrodef name="svn"
+            description="execute an svn command with args from the given dir">
+    <attribute name="args" />
+    <attribute name="dir" default="${basedir}" />
+    <sequential>
+      <var name="svnout" unset="true" /> <!-- reset svnout -->
+      <echo level="info" message="Executing @{dir}: svn @{args}" />
+      <exec vmlauncher="false" executable="${svn.exec}" dir="@{dir}" logError="true" outputproperty="svnout">
+        <arg line="@{args}" />
+      </exec>
+    </sequential>
+  </macrodef>
+
+  <macrodef name="svnapply"
+            description="apply an svn command with args from the given dir to a set of files">
+    <attribute name="args" />
+    <attribute name="dest" />
+    <attribute name="dir" default="${basedir}" />
+    <attribute name="parallel" default="false" />
+    <element name="files" implicit="true"/>
+    <sequential>
+      <apply dir="@{dir}" parallel="@{parallel}" executable="${svn.exec}" relative="true" dest="@{dest}" addsourcefile="true">
+        <arg line="@{args}" />
+        <srcfile />
+        <targetfile />
+        <mapper type="glob" from="*" to="@{dest}*"/>
+        <files />
+      </apply>
+    </sequential>
+  </macrodef>
+
+  <!-- ================= VALIDATION ===================== -->
+  <!-- verify the basedir appears to be a valid gdata-java-client/java directory -->
+  <condition property="is.gdata-java-client.basedir">
+    <and>
+      <available file="java/build"/>
+      <available file="java/build-samples"/>
+      <available file="java/build-src.xml"/>
+      <available file="java/build-src/core.xml"/>
+      <available file="java/deps"/>
+      <available file="java/manifest"/>
+      <available file="java/mashups"/>
+      <available file="java/src"/>
+      <available file="java/sample"/>
+      <available file=".svn"/>
+      <available file="README-src.txt"/>
+    </and>
+  </condition>
+  <!-- verify no existing code changes -->
+  <svn args="st"/>
+  <condition property="isready.gdata-java-client.basedir">
+    <and>
+      <equals arg1="${svnout}" arg2="" trim="true"/>
+      <isset property="is.gdata-java-client.basedir" />
+    </and>
+  </condition>
+  <!-- <fail unless="isready.gdata-java-client.basedir" message="Please make sure the basedir defined on the project element points to the latest trunk of gdata-java-client/java dir and contains no source changes before continuing." /> -->
+  <!-- Include root build script for gdata project to leverage it here -->
+  <import file="${basedir}/java/build-src.xml" optional="false"/>
+
+  <!-- ================= LOAD DATA FROM EXISTING SOURCES ========= -->
+  <target name="mvn.load.versions">
+    <!-- load properties from versions.properties -->
+    <property file="${basedir}/java/version.properties" prefix="versions."/>
+    <!-- put all the versions properties into a list -->
+    <propertyselector property="versions.list"
+                      delimiter="," match="versions\.(.*)"
+                      select="\1"
+                      casesensitive="true" />
+    <!-- sort the properties so that they are organized -->
+    <sortlist property="versions.sorted.list" value="${versions.list}"
+              delimiter="," />
+    <var name="versions.xml" value="" />
+    <for list="${versions.sorted.list}" delimiter="," param="item">
+      <sequential>
+        <var name="versions.xml" value="${versions.xml}    " />
+        <var name="versions.xml" value="${versions.xml}&lt;@{item}&gt;${versions.@{item}}&lt;/@{item}&gt;${line.separator}" />
+      </sequential>
+    </for>
+    <!-- <echoproperties prefix="${versions.xml}" /> -->
+  </target>
+
+  <target name="mvn.load.manifests">
+    <!-- load manifest entries as ant proeprties -->
+    <for param="manifestfile">
+      <fileset dir="${basedir}/java/manifest">
+        <include name="*.manifest" />
+      </fileset>
+      <sequential>
+        <!-- unset variables -->
+        <var name="tmpname" unset="true" />
+        <basename file="@{manifestfile}" property="tmpname" suffix="manifest"/>
+        <loadproperties srcFile="@{manifestfile}" >
+          <filterchain>
+            <prefixlines prefix="mvn.manifest.${tmpname}."/>
+          </filterchain>
+        </loadproperties>
+      </sequential>
+    </for>
+    <echoproperties prefix="mvn.manifest." />
+  </target>
+
+
+
+  <target name="mvn.load.meta">
+    <!-- we load from the service ant files, all services have meta jar -->
+    <for param="bfile">
+      <path refid="service.buildfiles" />
+      <sequential>
+        <var name="tmpname" unset="true" />
+        <var name="inc" unset="true" />
+        <var name="cp" unset="true" />
+        <basename file="@{bfile}" property="tmpname" suffix="xml"/>
+        <xmltask clearBuffers="a" source="@{bfile}" report="false"
+                 encoding="UTF-8" failWithoutMatch="true">
+          <copy path="//antcall[@target='template.build.service']/param[@name='template.service.includes']/@value" property="inc" />
+          <copy path="//antcall[@target='template.build.service']/param[@name='template.service.classpath']/@value" property="cp" />
+        </xmltask>
+        <property name="${tmpname}.isService" value="true" />
+        <property name="${tmpname}.includes" value="${inc}" />
+        <property name="${tmpname}.classpath" value="${cp}" />
+      </sequential>
+    </for>
+  </target>
+
+
+  <target name="mvn.load.dependencies" >
+    <!-- Predefine pom dependencies in xmltask buffers for dynamic POMS -->
+    <!-- these were determined by looking at paths ending in .classpath core.xml and base.xml -->
+    <tempfile property="temp.depfile" />
+    <tempfile property="temp.profile" />
+    <echo file="${temp.depfile}" encoding="UTF-8"><![CDATA[<dependencies></dependencies>]]></echo>
+    <echo file="${temp.profile}" encoding="UTF-8"><![CDATA[<profiles></profiles>]]></echo>
+    <xmltask source="${temp.depfile}" destbuffer="build.google-deps.classpath" report="false" outputter="simple:2" encoding="UTF-8" >
+      <insert path="/dependencies"><![CDATA[<dependency><groupId>com.google.code.findbugs</groupId><artifactId>jsr305</artifactId></dependency>
+      <dependency><groupId>com.google.collections</groupId><artifactId>google-collections</artifactId></dependency>]]></insert>
+    </xmltask>
+    <xmltask source="${temp.depfile}" destbuffer="build.service.core.classpath" report="false" outputter="simple:2" encoding="UTF-8" >
+      <insert path="/dependencies" expandProperties="false"><![CDATA[<dependency><groupId>com.google.code.findbugs</groupId><artifactId>jsr305</artifactId></dependency>
+      <dependency><groupId>com.google.collections</groupId><artifactId>google-collections</artifactId></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-client</artifactId><version>${project.version}</version></dependency>]]></insert>
+    </xmltask>
+    <xmltask source="${temp.depfile}" destbuffer="build.core.client.classpath" report="false" outputter="simple:2" encoding="UTF-8" >
+      <insert path="/dependencies"><![CDATA[<dependency><groupId>com.google.code.findbugs</groupId><artifactId>jsr305</artifactId></dependency>
+      <dependency><groupId>com.google.collections</groupId><artifactId>google-collections</artifactId></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-core</artifactId><version>${project.version}</version></dependency>]]></insert>
+    </xmltask>
+    <xmltask sourcebuffer="build.service.core.classpath" >
+      <print buffer="build.service.core.classpath" />
+    </xmltask>
+    <!-- needs activation profile -->
+    <xmltask source="${temp.depfile}" destbuffer="build.media.classpath" report="false" outputter="simple:2" encoding="UTF-8" >
+      <insert path="/dependencies"><![CDATA[<dependency><groupId>javax.mail</groupId><artifactId>mail</artifactId></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-core</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-client</artifactId><version>${project.version}</version></dependency>]]>
+      </insert>
+    </xmltask>
+    <xmltask source="${temp.depfile}" destbuffer="build.core.media.classpath" report="false" outputter="simple:2" encoding="UTF-8" >
+      <insert path="/dependencies"><![CDATA[<dependency><groupId>com.google.code.findbugs</groupId><artifactId>jsr305</artifactId></dependency>
+      <dependency><groupId>com.google.collections</groupId><artifactId>google-collections</artifactId></dependency>
+      <dependency><groupId>javax.mail</groupId><artifactId>mail</artifactId></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-core</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-client</artifactId><version>${project.version}</version></dependency>]]>
+      </insert>
+    </xmltask>
+    <!-- needs activation profile -->
+    <xmltask source="${temp.depfile}" destbuffer="build.service.media.classpath" report="false" outputter="simple:2" encoding="UTF-8" >
+      <insert path="/dependencies"><![CDATA[<dependency><groupId>com.google.code.findbugs</groupId><artifactId>jsr305</artifactId></dependency>
+      <dependency><groupId>com.google.collections</groupId><artifactId>google-collections</artifactId></dependency>
+      <dependency><groupId>javax.mail</groupId><artifactId>mail</artifactId></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-client</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-media</artifactId><version>${project.version}</version></dependency>
+      ]]>
+      </insert>
+    </xmltask>
+    <!-- needs activation profile -->
+    <xmltask source="${temp.depfile}" destbuffer="build.gbase.classpath" report="false" outputter="simple:2" encoding="UTF-8" >
+      <insert path="/dependencies"><![CDATA[<dependency><groupId>com.google.code.findbugs</groupId><artifactId>jsr305</artifactId></dependency>
+      <dependency><groupId>com.google.collections</groupId><artifactId>google-collections</artifactId></dependency>
+      <dependency><groupId>javax.mail</groupId><artifactId>mail</artifactId></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-client</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-media</artifactId><version>${project.version}</version></dependency>
+      ]]>
+      </insert>
+    </xmltask>
+    <xmltask source="${temp.depfile}" destbuffer="build.service.appsforyourdomain.classpath" report="false" outputter="simple:2" encoding="UTF-8" >
+      <insert path="/dependencies"><![CDATA[<dependency><groupId>com.google.code.findbugs</groupId><artifactId>jsr305</artifactId></dependency>
+      <dependency><groupId>com.google.collections</groupId><artifactId>google-collections</artifactId></dependency>
+      <dependency><groupId>javax.mail</groupId><artifactId>mail</artifactId></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-client</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-media</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-calendar</artifactId><version>${project.version}</version></dependency>
+      ]]>
+      </insert>
+    </xmltask>
+    <xmltask source="${temp.depfile}" destbuffer="build.service.docs.classpath" report="false" outputter="simple:2" encoding="UTF-8" >
+      <insert path="/dependencies"><![CDATA[<dependency><groupId>com.google.code.findbugs</groupId><artifactId>jsr305</artifactId></dependency>
+      <dependency><groupId>com.google.collections</groupId><artifactId>google-collections</artifactId></dependency>
+      <dependency><groupId>javax.mail</groupId><artifactId>mail</artifactId></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-client</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-media</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-spreadsheet</artifactId><version>${project.version}</version></dependency>
+      ]]>
+      </insert>
+    </xmltask>
+    <xmltask source="${temp.depfile}" destbuffer="build.service.sites.classpath" report="false" outputter="simple:2" encoding="UTF-8" >
+      <insert path="/dependencies"><![CDATA[<dependency><groupId>com.google.code.findbugs</groupId><artifactId>jsr305</artifactId></dependency>
+      <dependency><groupId>com.google.collections</groupId><artifactId>google-collections</artifactId></dependency>
+      <dependency><groupId>javax.mail</groupId><artifactId>mail</artifactId></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-client</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-media</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>com.google.gdata</groupId><artifactId>gdata-spreadsheet</artifactId><version>${project.version}</version></dependency>
+      ]]>
+      </insert>
+    </xmltask>
+    <xmltask >
+      <print buffer="build.service.media.classpath" />
+      <print buffer="build.gbase.classpath" />
+    </xmltask>
+    <xmltask source="${temp.profile}" destbuffer="activation.profile" report="false" outputter="simple:2" encoding="UTF-8" >
+      <insert path="/profiles"><![CDATA[
+  <profile>
+    <id>jdk15-activation</id>
+    <activation>
+      <jdk>[1.5,1.6)</jdk>
+    </activation>
+    <dependencies>
+      <dependency>
+        <groupId>javax.activation</groupId>
+        <artifactId>activation</artifactId>
+      </dependency>
+    </dependencies>
+  </profile>]]>
+      </insert>
+    </xmltask>
+    <delete file="${temp.profile}" />
+    <delete file="${temp.depfile}" />
+  </target>
+
+
+  <!-- ====== Create projects from existing java sources ===== -->
+  <target name="mvn.gdata-core">
+    <!-- creates the gdata-core project directory -->
+    <svnapply dir="${basedir}/java/src" dest="../gdata-core/src/main/java/" args="${svn.move}" >
+      <fileset dir="${basedir}/java/src">
+        <include name="com/google/gdata/client/*.java"/>
+        <include name="com/google/gdata/client/authn/**/*.java"/>
+        <include name="com/google/gdata/client/batch/**/*.java"/>
+        <include name="com/google/gdata/client/http/**/*.java"/>
+        <include name="com/google/gdata/data/*.java"/>
+        <include name="com/google/gdata/data/acl/**/*.java"/>
+        <include name="com/google/gdata/data/apt/**/*.java"/>
+        <include name="com/google/gdata/data/batch/**/*.java"/>
+        <include name="com/google/gdata/data/dublincore/**/*.java"/>
+        <include name="com/google/gdata/data/geo/**/*.java"/>
+        <include name="com/google/gdata/data/introspection/**/*.java"/>
+        <include name="com/google/gdata/data/threading/**/*.java"/>
+        <include name="com/google/gdata/model/*.java"/>
+        <include name="com/google/gdata/model/atom/*.java"/>
+        <include name="com/google/gdata/model/atompub/*.java"/>
+        <include name="com/google/gdata/model/batch/*.java"/>
+        <include name="com/google/gdata/model/gd/*.java"/>
+        <include name="com/google/gdata/model/transforms/atom/*.java"/>
+        <include name="com/google/gdata/model/transforms/atompub/*.java"/>
+        <include name="com/google/gdata/util/**/*.java"/>
+        <include name="com/google/gdata/wireformats/*.java"/>
+        <include name="com/google/gdata/wireformats/input/*.java"/>
+        <include name="com/google/gdata/wireformats/output/*.java"/>
+        <exclude name="com/google/gdata/data/MediaContent.java"/>
+      </fileset>
+    </svnapply>
+    <property name="core.classpath" value="build.google-deps.classpath" />
+    <genpom modulename="core" impl.version.name="client"
+            spec.version.name="client"/>
+  </target>
+
+  <target name="mvn.gdata-client">
+    <!-- creates the gdata-client project dir -->
+    <svnapply dir="${basedir}/java/src" dest="../gdata-client/src/main/java/" args="${svn.move}" >
+      <fileset dir="${basedir}/java/src">
+        <include name="com/google/gdata/data/extensions/*.java"/>
+      </fileset>
+    </svnapply>
+    <!-- flag inclusion of apt procesing in pom -->
+    <property name="client.isService" value="true" />
+    <property name="client.classpath" value="build.core.client.classpath" />
+    <genpom modulename="client"/>
+  </target>
+
+  <target name="mvn.gdata-base">
+    <!-- creates the gdata-base project dir , no meta -->
+    <svnapply dir="${basedir}/java/src" dest="../gdata-base/src/main/java/" args="${svn.move}" >
+      <fileset dir="${basedir}/java/src">
+        <include name="**/gbase/client/*.java"/>
+      </fileset>
+    </svnapply>
+    <property name="base.classpath" value="build.gbase.classpath" />
+    <genpom modulename="base"/>
+  </target>
+
+  <target name="mvn.gdata-media">
+    <!-- creates the gdata-media project dir , no meta data -->
+    <svnapply dir="${basedir}/java/src" dest="../gdata-media/src/main/java/" args="${svn.move}" >
+      <fileset dir="${basedir}/java/src">
+        <include name="**/data/MediaContent.java"/>
+        <include name="**/data/media/**"/>
+        <include name="**/client/media/**"/>
+        <include name="**/wireformats/input/media/*.java"/>
+        <include name="**/wireformats/output/media/*.java"/>
+      </fileset>
+    </svnapply>
+    <property name="media.classpath" value="build.core.media.classpath" />
+    <genpom modulename="media"/>
+  </target>
+
+
+  <target name="mvn.gdata-services" depends="mvn.load.versions,mvn.load.manifests">
+    <!-- create as many poms as we can from a template -->
+
+    <for param="bfile">
+      <path refid="service.buildfiles" />
+      <sequential>
+        <var name="tmpname" unset="true" />
+        <basename file="@{bfile}" property="tmpname" suffix="xml"/>
+        <!-- copy class files -->
+        <propertycopy override="true" name="inc" from="${tmpname}.includes" />
+        <svnapply dir="${basedir}/java/src" dest="../gdata-${tmpname}/src/main/java/" args="${svn.move}" >
+          <fileset dir="${basedir}/java/src">
+            <include name="${inc}"/>
+          </fileset>
+        </svnapply>
+        <genpom modulename="${tmpname}" />
+      </sequential>
+    </for>
+
+  </target>
+
+
+  <macrodef name="genpom" description="creates a pom and all resources">
+    <!-- this macro requires versions to be loaded -->
+    <attribute name="modulename" description="simple name describing the project" />
+    <!-- deafults -->
+    <attribute name="projdir" default="${basedir}/java/gdata-@{modulename}" description="working dir of the project" />
+    <attribute name="pomfile" default="@{projdir}/pom.xml" />
+    <attribute name="spec.version.name" default="@{modulename}"/>
+    <attribute name="impl.version.name" default="@{modulename}"/>
+    <sequential>
+
+      <xmltask source="${gdata-maven.dir}/module-template-pom.xml" destbuffer="pomxml"
+               clearBuffers="pomxml" report="false" encoding="UTF-8" />
+      <!-- create pom file -->
+      <xmltask sourcebuffer="pomxml" report="false" destbuffer="pomxml"
+               outputter="simple:2" encoding="UTF-8" failWithoutMatch="true">
+        <insert path="/project/parent/version" xml="${versions.client.impl.version}"/>
+        <insert path="/project/artifactId" xml="gdata-@{modulename}" />
+        <insert path="/project/description" xml="${mvn.manifest.@{modulename}.Implementation-Title}" />
+        <!-- write manifest info -->
+        <insert path="//manifestSection/name" xml="${mvn.manifest.@{modulename}.Name}" />
+        <insert path="//Specification-Title" xml="${mvn.manifest.@{modulename}.Specification-Title}" />
+        <insert path="//Specification-Version" xml="$${@{spec.version.name}.spec.version}" expandProperties="false" />
+        <insert path="//Implementation-Title" xml="${mvn.manifest.@{modulename}.Implementation-Title}" />
+        <insert path="//Implementation-Version" xml="$${@{impl.version.name}.impl.version}" expandProperties="false" />
+      </xmltask>
+
+      <!-- add dependencies to pom based on modulename.classpath -->
+      <if>
+        <isset property="@{modulename}.classpath" />
+        <then>
+          <xmltask sourcebuffer="pomxml" report="false" destbuffer="pomxml"
+                   encoding="UTF-8" failWithoutMatch="true">
+            <replace path="//dependencies" withBuffer="${@{modulename}.classpath}" />
+          </xmltask>
+        </then>
+      </if>
+
+      <!-- add service related pom config -->
+      <if>
+        <istrue value="${@{modulename}.isService}" />
+        <then>
+          <xmltask sourcebuffer="pomxml" report="false" destbuffer="pomxml"
+                   encoding="UTF-8" failWithoutMatch="true">
+            <!-- meta jar config -->
+            <insert path="//plugin/executions/execution/configuration[1]/archive" position="before"><![CDATA[
+        <excludes>
+          <exclude>META-INF/**</exclude>
+        </excludes>
+        <includes>
+          <include>META-INF/MANIFEST.MF</include>
+          <include>**/**</include>
+        </includes>
+          ]]>
+            </insert>
+            <insert path="//plugin/executions/execution" position="after"><![CDATA[
+          <execution>
+            <id>meta-jar</id>
+            <phase>package</phase>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+            <configuration>
+              <classifier>meta</classifier>
+              <includes>
+                <include>META-INF/gdata/**</include>
+              </includes>
+            </configuration>
+          </execution>
+          ]]>
+            </insert>
+            <!-- apt plugin -->
+            <insert path="//plugin[1]" position="after"><![CDATA[
+          <plugin><groupId>org.codehaus.mojo</groupId><artifactId>apt-maven-plugin</artifactId></plugin>
+          ]]>
+            </insert>
+            <!-- activation profile -->
+            <insert path="//build" buffer="activation.profile" position="after" />
+          </xmltask>
+        </then>
+        <else>
+
+        </else>
+      </if>
+      <!-- write pom to disk -->
+      <xmltask sourcebuffer="pomxml" report="true" dest="@{pomfile}"
+               outputter="simple:2" encoding="UTF-8" >
+      </xmltask>
+      <!-- last add the proper namespaces and xml decl to the pom.xml
+      I removed them in the template to make the xpath easier -->
+      <replace encoding="UTF-8" file="@{pomfile}">
+        <replacetoken><![CDATA[<project>]]></replacetoken>
+        <replacevalue><![CDATA[<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">]]></replacevalue>
+      </replace>
+
+    </sequential>
+  </macrodef>
+
+  <target name="mvn.resources" depends="mvn.load.versions,mvn.load.manifests,mvn.load.meta,mvn.load.dependencies">
+    <!-- copy resources as is -->
+    <copy todir="${basedir}" overwrite="true" verbose="true">
+      <fileset dir="${gdata-maven.dir}">
+        <include name="pom.xml" />
+        <include name="java/pom.xml" />
+      </fileset>
+      <filterset>
+        <filter token="gdata-java-client.version" value="${versions.client.impl.version}" />
+      </filterset>
+    </copy>
+
+    <!-- replace version properties placeholder in java pom.xml -->
+    <replace value="${versions.xml}" file="${basedir}/java/pom.xml">
+      <replacetoken><![CDATA[    <versions.xml></versions.xml>]]></replacetoken>
+    </replace>
+
+  </target>
+
+  <target name="mvn.svncleanup">
+    <!-- svn add all files not already added -->
+    <apply executable="${svn.exec}" dir="${basedir}" parallel="true"
+           relative="true">
+      <arg line="${svn.add}"/>
+      <fileset dir="${basedir}" includes="**/**" excludes="**/target/**"/>
+    </apply>
+    <!-- TODO remove uneeded dirs and files tied to ant -->
+  </target>
+
+  <target name="mavenize" description="Convert GData Java Client into Maven projects"
+          depends="mvn.load.versions,
+          mvn.load.manifests,
+          mvn.load.meta,
+          mvn.load.dependencies,
+          mvn.gdata-core,
+          mvn.gdata-client,
+          mvn.gdata-base,
+          mvn.gdata-media,
+          mvn.gdata-services,
+          mvn.resources,
+          mvn.svncleanup">
+  </target>
+
+  <target name="demavenize" description="Undo mavenize">
+    <copy file="java/build-src/build.properties" tofile="java/build-src/keep.properties" />
+    <svn args="revert ./ -R" />
+    <svn args="up" />
+    <delete failonerror="true" includeemptydirs="true" verbose="true">
+      <fileset dir="${basedir}">
+        <include name="java/gdata-*/**" />
+        <include name="**/pom.xml" />
+      </fileset>
+    </delete>
+    <move file="java/build-src/keep.properties" tofile="java/build-src/build.properties" overwrite="true"/>
+  </target>
+
+</project>

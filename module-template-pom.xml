@@ -1,0 +1,42 @@
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.google.gdata</groupId>
+    <artifactId>gdata-java-client</artifactId>
+    <version></version>
+  </parent>
+  <artifactId></artifactId>
+  <packaging>jar</packaging>
+  <name>${project.artifactId}</name>
+  <description></description>
+  <dependencies></dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-jar-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>default-jar</id>
+            <configuration>
+              <archive>
+                <manifestSections>
+                  <manifestSection>
+                    <name></name>
+                    <manifestEntries>
+                      <Specification-Title></Specification-Title>
+                      <Specification-Version></Specification-Version>
+                      <Specification-Vendor>Google Inc.</Specification-Vendor>
+                      <Implementation-Title></Implementation-Title>
+                      <Implementation-Version></Implementation-Version>
+                      <Implementation-Vendor>Google Inc.</Implementation-Vendor>
+                    </manifestEntries>
+                  </manifestSection>
+                </manifestSections>
+              </archive>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
